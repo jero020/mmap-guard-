@@ -6,7 +6,9 @@
  *    En la carga el verificador del kernel valida el programa y libbpf reubica los
  *    offsets de struct file / inode / vm_area_struct según el BTF del kernel en ejecución.
  * 2. Lee config/protected.conf, resuelve cada ruta a (dev, inode) y llena los mapas.
- * 3. Adjunta los programas a los hooks LSM y espera hasta SIGINT/SIGTERM.
+ * 3. Adjunta los programas a los hooks LSM.
+ * 4. Consume el ring buffer de auditoría e imprime un evento por línea hasta SIGINT/SIGTERM;
+ *    al salir imprime los contadores por decisión (sumados sobre todas las CPUs).
  *
  * Uso: sudo ./build/mmap_guardd [-c conf] [-a] [-A] [-i] [-v]
  */
@@ -17,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
@@ -139,6 +142,94 @@ static int load_config(struct mmap_guard_bpf *skel, const struct options *o)
     return 0;
 }
 
+static const char *hook_str(__u32 h)
+{
+    return h == MG_HOOK_MMAP_FILE ? "mmap" : h == MG_HOOK_FILE_MPROTECT ? "mprotect" : "?";
+}
+
+static const char *decision_str(__u32 d)
+{
+    switch (d) {
+    case MG_ALLOW:           return "ALLOW";
+    case MG_DENY:            return "DENY";
+    case MG_ALLOW_WHITELIST: return "ALLOW_WL";
+    case MG_WOULD_DENY:      return "WOULD_DENY";
+    default:                 return "?";
+    }
+}
+
+static const char *reason_str(__u32 r)
+{
+    switch (r) {
+    case MG_R_NONE:           return "-";
+    case MG_R_SHARED_WRITE:   return "shared_write";
+    case MG_R_EXEC:           return "exec";
+    case MG_R_MPROTECT_WRITE: return "mprotect_+w";
+    case MG_R_MPROTECT_EXEC:  return "mprotect_+x";
+    default:                  return "?";
+    }
+}
+
+static void prot_str(__u64 prot, char out[4])
+{
+    out[0] = (prot & MG_PROT_READ)  ? 'r' : '-';
+    out[1] = (prot & MG_PROT_WRITE) ? 'w' : '-';
+    out[2] = (prot & MG_PROT_EXEC)  ? 'x' : '-';
+    out[3] = '\0';
+}
+
+/* Callback de ring_buffer__poll(): un evento por llamada. */
+static int handle_event(void *ctx, void *data, size_t len)
+{
+    const struct mg_event *e = data;
+    struct timespec now;
+    struct tm tm;
+    char prot[4], ts[16];
+
+    (void)ctx;
+    if (len < sizeof(*e))
+        return 0;
+    clock_gettime(CLOCK_REALTIME, &now);
+    localtime_r(&now.tv_sec, &tm);
+    strftime(ts, sizeof(ts), "%H:%M:%S", &tm);
+    prot_str(e->prot, prot);
+
+    printf("%s.%03ld %-8s %-10s %-12s pid=%-6u uid=%-5u comm=%-15.16s "
+           "ino=%llu prot=%s flags=0x%llx\n",
+           ts, now.tv_nsec / 1000000, hook_str(e->hook), decision_str(e->decision),
+           reason_str(e->reason), e->pid, e->uid, e->comm,
+           (unsigned long long)e->ino, prot, (unsigned long long)e->flags);
+    fflush(stdout);
+    return 0;
+}
+
+/* Suma un contador BPF_MAP_TYPE_PERCPU_ARRAY sobre todas las CPUs posibles. */
+static void print_stats(struct mmap_guard_bpf *skel)
+{
+    int ncpu = libbpf_num_possible_cpus();
+    __u64 *vals;
+    __u32 d;
+
+    if (ncpu <= 0)
+        return;
+    vals = calloc((size_t)ncpu, sizeof(*vals));
+    if (!vals)
+        return;
+    printf("\n[stats] decisiones sobre archivos protegidos (incluye ALLOW solo si aplica):\n");
+    for (d = 0; d < MG_DECISION_MAX; d++) {
+        __u64 sum = 0;
+        int c;
+
+        if (bpf_map__lookup_elem(skel->maps.stats, &d, sizeof(d), vals,
+                                 sizeof(*vals) * (size_t)ncpu, 0) < 0)
+            continue;
+        for (c = 0; c < ncpu; c++)
+            sum += vals[c];
+        printf("  %-10s %llu\n", decision_str(d), (unsigned long long)sum);
+    }
+    free(vals);
+}
+
 static void usage(const char *prog)
 {
     fprintf(stderr,
@@ -154,6 +245,7 @@ int main(int argc, char **argv)
 {
     struct options o = { .conf = "config/protected.conf" };
     struct mmap_guard_bpf *skel = NULL;
+    struct ring_buffer *rb = NULL;
     struct mg_config cfg;
     __u32 zero = 0;
     int opt, err = 1;
@@ -200,15 +292,29 @@ int main(int argc, char **argv)
         goto out;
     }
 
+    rb = ring_buffer__new(bpf_map__fd(skel->maps.events), handle_event, NULL, NULL);
+    if (!rb) {
+        fprintf(stderr, "Error creando ring buffer: %s\n", strerror(errno));
+        goto out;
+    }
+
     printf("[mmap-guard] activo (modo %s). Ctrl+C para salir.\n",
            o.audit_only ? "AUDITORÍA" : "BLOQUEO");
     fflush(stdout);
 
-    while (!g_stop)
-        pause();
+    while (!g_stop) {
+        int n = ring_buffer__poll(rb, 200 /* ms */);
+
+        if (n < 0 && n != -EINTR) {
+            fprintf(stderr, "Error en ring_buffer__poll: %d\n", n);
+            goto out;
+        }
+    }
+    print_stats(skel);
     err = 0;
 
 out:
+    ring_buffer__free(rb);
     mmap_guard_bpf__destroy(skel);         /* desadjunta hooks y libera mapas */
     return err;
 }
