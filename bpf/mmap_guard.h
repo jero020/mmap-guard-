@@ -43,6 +43,8 @@ enum mg_decision {
     MG_ALLOW            = 0,
     MG_DENY             = 1,
     MG_ALLOW_WHITELIST  = 2,   /* habría sido denegado, pero el UID está en lista blanca */
+    MG_WOULD_DENY       = 3,   /* modo auditoría (enforce=0): se habría denegado          */
+    MG_DECISION_MAX     = 4,
 };
 
 /* Motivo de la denegación (o de la auditoría). */

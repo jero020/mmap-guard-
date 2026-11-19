@@ -16,7 +16,9 @@ KDIR     ?= /lib/modules/$(KVER)/build
 
 CLANG    ?= clang
 CC       ?= gcc
-BPFTOOL  ?= $(or $(shell command -v bpftool 2>/dev/null),$(firstword $(wildcard /usr/lib/linux-tools/*/bpftool)))
+# En Ubuntu /usr/sbin/bpftool es un wrapper que falla si no hay linux-tools para el kernel
+# exacto; en ese caso se usa cualquier bpftool real instalado en /usr/lib/linux-tools/.
+BPFTOOL  ?= $(or $(shell bpftool version >/dev/null 2>&1 && command -v bpftool),$(firstword $(wildcard /usr/lib/linux-tools/*/bpftool)))
 VMLINUX_BTF ?= /sys/kernel/btf/vmlinux
 
 CFLAGS   := -O2 -g -Wall -Wextra -Werror -std=gnu11
@@ -42,7 +44,7 @@ $(BUILD) $(BUILD)/tests:
 # vmlinux.h se genera desde el BTF del kernel en ejecución (CO-RE). No se versiona.
 $(VMLINUX_H):
 	@test -n "$(BPFTOOL)" || { echo "ERROR: bpftool no encontrado"; exit 1; }
-	$(BPFTOOL) btf dump file $(VMLINUX_BTF) format c > $@
+	$(BPFTOOL) btf dump file $(VMLINUX_BTF) format c > $@.tmp && mv $@.tmp $@
 
 $(BPF_OBJ): bpf/mmap_guard.bpf.c bpf/mmap_guard.h $(VMLINUX_H) | $(BUILD)
 	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
