@@ -32,7 +32,12 @@ head -c 1048576 /dev/urandom > "$DEMO/protegido.bin"
 INO=$(stat -c %i "$DEMO/protegido.bin")
 echo "protect $DEMO/protegido.bin" > "$DEMO/bench.conf"
 HAS_BPF=0; grep -qw bpf /sys/kernel/security/lsm 2>/dev/null && HAS_BPF=1
-HAS_PERF=0; command -v perf >/dev/null && perf stat true >/dev/null 2>&1 && HAS_PERF=1
+# perf en Ubuntu es un wrapper que falla con kernels no estándar (OrbStack): buscar el binario real.
+PERF=""
+for c in perf /usr/lib/linux-tools/*/perf /usr/lib/linux-tools-*/perf; do
+    if command -v "$c" >/dev/null 2>&1 && "$c" stat -e task-clock true >/dev/null 2>&1; then PERF=$c; break; fi
+done
+HAS_PERF=0; [[ -n $PERF ]] && HAS_PERF=1
 
 measure() {   # measure <etiqueta>
     echo "### $1" | tee -a "$OUT"
@@ -41,14 +46,14 @@ measure() {   # measure <etiqueta>
             | tee -a "$OUT"
     done
     if [[ $HAS_PERF -eq 1 ]]; then
-        perf stat -e page-faults,minor-faults,context-switches,task-clock \
+        "$PERF" stat -e page-faults,minor-faults,context-switches,task-clock \
             "$ROOT/build/tests/test_concurrency" "$DEMO/protegido.bin" allow 8 2000 \
             2>&1 >/dev/null | grep -E "page-faults|minor|context|task-clock|elapsed" | tee -a "$OUT"
     fi
     echo | tee -a "$OUT"
 }
 
-{ echo "# mmap-guard bench — $(date)"; echo "# kernel $(uname -r), iteraciones $ITERS"; echo; } > "$OUT"
+{ echo "# mmap-guard bench — $(date)"; echo "# kernel $(uname -r), iteraciones $ITERS, perf: ${PERF:-no disponible}"; echo; } > "$OUT"
 
 measure "base (sin guard)"
 
