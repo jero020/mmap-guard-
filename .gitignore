@@ -1,0 +1,22 @@
+# Objetos y binarios
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+.*.cmd
+Module.symvers
+modules.order
+.tmp_versions/
+build/
+
+# Generados por BPF
+bpf/vmlinux.h
+*.skel.h
+
+# Binarios de loader y pruebas
+loader/mmap_guardd
+tests/bin/
+
+# Resultados de benchmark
+results/*.txt
