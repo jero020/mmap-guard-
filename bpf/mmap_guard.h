@@ -61,7 +61,9 @@ enum mg_reason {
 
 /* Clave del mapa protected_inodes. Se rellena con ceros para que no haya padding basura. */
 struct mg_inode_key {
-    __u64 dev;     /* sb->s_dev (codificación interna del kernel, ver new_encode_dev) */
+    __u64 dev;     /* sb->s_dev en formato interno del kernel: (MAJOR << 20) | MINOR.
+                    * OJO: NO es el mismo formato que st_dev de stat(2); el loader convierte.
+                    * dev = 0 actúa como comodín (coincide con cualquier dispositivo). */
     __u64 ino;     /* inode->i_ino */
 };
 

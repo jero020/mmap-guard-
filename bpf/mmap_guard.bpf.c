@@ -84,6 +84,22 @@ static __always_inline int file_to_key(struct file *file, struct mg_inode_key *k
     return 0;
 }
 
+/*
+ * Busca la política de un inode. Primero por (dev, ino) exacto y, si no hay entrada,
+ * por (0, ino): el "comodín de dispositivo". Hace falta porque en btrfs (raíz de OrbStack)
+ * y overlayfs el st_dev que ve stat(2) en usuario NO coincide con inode->i_sb->s_dev.
+ * Costo: dos búsquedas hash O(1) en el peor caso.
+ */
+static __always_inline __u32 *lookup_policy(const struct mg_inode_key *key)
+{
+    struct mg_inode_key any = { .dev = 0, .ino = key->ino };
+    __u32 *pol = bpf_map_lookup_elem(&protected_inodes, key);
+
+    if (!pol)
+        pol = bpf_map_lookup_elem(&protected_inodes, &any);
+    return pol;
+}
+
 static __always_inline struct mg_config *get_config(void)
 {
     __u32 zero = 0;
@@ -186,7 +202,7 @@ int BPF_PROG(mg_mmap_file, struct file *file, unsigned long reqprot,
     if (file_to_key(file, &key) < 0)
         return 0;
 
-    policy = bpf_map_lookup_elem(&protected_inodes, &key);
+    policy = lookup_policy(&key);
     if (!policy)
         return 0;                        /* camino rápido: archivo no protegido */
 
@@ -234,7 +250,7 @@ int BPF_PROG(mg_file_mprotect, struct vm_area_struct *vma, unsigned long reqprot
     if (file_to_key(file, &key) < 0)
         return 0;                        /* VMA anónimo (heap, stack, MAP_ANONYMOUS) */
 
-    policy = bpf_map_lookup_elem(&protected_inodes, &key);
+    policy = lookup_policy(&key);
     if (!policy)
         return 0;
 
