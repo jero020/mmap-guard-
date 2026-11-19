@@ -12,7 +12,16 @@
  *   - "bpf" en /sys/kernel/security/lsm (parámetro de arranque lsm=...,bpf)
  *   - CONFIG_DEBUG_INFO_BTF=y          (CO-RE: BPF_CORE_READ reubica offsets en carga)
  */
+/*
+ * vmlinux.h lo genera bpftool desde el BTF del kernel en ejecución. Con kernels 7.x y
+ * clang 21 contiene declaraciones vacías dentro de structs (p. ej. "struct ns_tree;") que
+ * disparan -Wmissing-declarations. Es código generado: se silencia SOLO ese warning y SOLO
+ * para este include; el resto del archivo sigue compilando con -Werror.
+ */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-declarations"
 #include "vmlinux.h"
+#pragma clang diagnostic pop
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
@@ -246,7 +255,10 @@ int BPF_PROG(mg_file_mprotect, struct vm_area_struct *vma, unsigned long reqprot
     if (ret != 0)
         return ret;
 
-    file = BPF_CORE_READ(vma, vm_file);
+    /* En algunos BTF (7.x) existen dos variantes de struct file y vm_file queda tipado
+     * como "struct file___2 *". CO-RE las trata como el mismo tipo; el cast solo
+     * satisface al compilador. */
+    file = (struct file *)BPF_CORE_READ(vma, vm_file);
     if (file_to_key(file, &key) < 0)
         return 0;                        /* VMA anónimo (heap, stack, MAP_ANONYMOUS) */
 
