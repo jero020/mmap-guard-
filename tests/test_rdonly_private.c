@@ -10,7 +10,9 @@
  * nunca cambia.
  *
  * La prueba demuestra las tres cosas:
- *   1. O_RDONLY + MAP_SHARED + PROT_WRITE   -> EACCES (lo bloquea el propio kernel).
+ *   1. O_RDONLY + MAP_SHARED + PROT_WRITE   -> bloqueado. Sin guard: EACCES (chequeo
+ *      FMODE_WRITE en do_mmap). Con guard: EPERM, porque vm_mmap_pgoff() llama a
+ *      security_mmap_file() ANTES de do_mmap(), así que el LSM decide primero.
  *   2. O_RDONLY + MAP_PRIVATE + PROT_WRITE  -> permitido, y la escritura es visible
  *      solo dentro del proceso.
  *   3. El contenido en disco/page cache (hash con read(2)) es idéntico antes y después.
@@ -44,9 +46,10 @@ int main(int argc, char **argv)
 
     /* 1. Escritura compartida sobre fd de solo lectura: el kernel debe dar EACCES. */
     q = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    ok = (q == MAP_FAILED && errno == EACCES);
-    printf("  [%s] %-45s -> %s\n", ok ? "PASS" : "FAIL", "O_RDONLY + MAP_SHARED + PROT_WRITE",
-           q == MAP_FAILED ? strerror(errno) : "permitido (¡inesperado!)");
+    ok = (q == MAP_FAILED && (errno == EACCES || errno == EPERM));
+    printf("  [%s] %-45s -> %s%s\n", ok ? "PASS" : "FAIL", "O_RDONLY + MAP_SHARED + PROT_WRITE",
+           q == MAP_FAILED ? strerror(errno) : "permitido (¡inesperado!)",
+           q != MAP_FAILED ? "" : errno == EPERM ? " (lo negó el LSM)" : " (lo negó do_mmap)");
     if (!ok)
         g_failures++;
     if (q != MAP_FAILED)
