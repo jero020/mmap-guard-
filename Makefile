@@ -62,7 +62,7 @@ loader: $(LOADER)
 lkm:
 	$(MAKE) -C lkm KDIR=$(KDIR)
 
-$(BUILD)/tests/%: tests/%.c | $(BUILD)/tests
+$(BUILD)/tests/%: tests/%.c tests/common.h | $(BUILD)/tests
 	$(CC) $(CFLAGS) $< -o $@ -lpthread
 
 tests: $(TEST_BINS)
