@@ -44,9 +44,16 @@ if [[ $MODE == auto ]]; then
 fi
 echo "== mmap-guard: modo $MODE =="
 
+KDIR=/lib/modules/$(uname -r)/build
+HAS_KDIR=0; [[ -f $KDIR/Makefile ]] && HAS_KDIR=1
+if [[ $MODE == lkm && $HAS_KDIR -eq 0 && ! -f $ROOT/lkm/pf_monitor.ko ]]; then
+    echo "ERROR: modo lkm sin headers del kernel ($KDIR) ni pf_monitor.ko compilado"; exit 2
+fi
 if [[ $BUILD -eq 1 ]]; then
-    if [[ $MODE == bpf ]]; then make -C "$ROOT" bpf loader tests >/dev/null; fi
-    make -C "$ROOT" lkm tests >/dev/null
+    if [[ $MODE == bpf ]]; then make -C "$ROOT" bpf loader >/dev/null; fi
+    make -C "$ROOT" tests >/dev/null
+    if [[ $HAS_KDIR -eq 1 ]]; then make -C "$ROOT" lkm >/dev/null
+    else echo "(sin headers del kernel: se omite pf_monitor)"; fi
 fi
 
 # --- Archivos de prueba --------------------------------------------------------------
@@ -97,7 +104,9 @@ if [[ $MODE == bpf ]]; then
         sleep 0.1
     done
     # pf_monitor solo como medición (sin enforce).
-    if insmod "$ROOT/lkm/pf_monitor.ko" ino="$INO_S,$INO_P" 2>/dev/null; then LKM_LOADED=1; fi
+    if [[ -f $ROOT/lkm/pf_monitor.ko ]] && insmod "$ROOT/lkm/pf_monitor.ko" ino="$INO_S,$INO_P"; then
+        LKM_LOADED=1
+    fi
 else
     insmod "$ROOT/lkm/pf_monitor.ko" ino="$INO_S,$INO_P" enforce=1
     LKM_LOADED=1

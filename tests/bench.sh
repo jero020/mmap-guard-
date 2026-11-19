@@ -24,7 +24,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-make -C "$ROOT" all >/dev/null 2>&1 || make -C "$ROOT" lkm tests >/dev/null
+make -C "$ROOT" tests >/dev/null
+make -C "$ROOT" bpf loader >/dev/null 2>&1 || echo "(no se pudo compilar la parte BPF)"
+[[ -f /lib/modules/$(uname -r)/build/Makefile ]] && make -C "$ROOT" lkm >/dev/null
 mkdir -p "$ROOT/results" "$DEMO"
 head -c 1048576 /dev/urandom > "$DEMO/protegido.bin"
 INO=$(stat -c %i "$DEMO/protegido.bin")
@@ -58,8 +60,12 @@ if [[ $HAS_BPF -eq 1 ]]; then
     kill -INT "$GUARD_PID"; wait "$GUARD_PID" 2>/dev/null || true; GUARD_PID=""
 fi
 
-insmod "$ROOT/lkm/pf_monitor.ko" ino="$INO"
-measure "lkm pf_monitor (kprobe handle_mm_fault)"
-rmmod pf_monitor
+if [[ -f $ROOT/lkm/pf_monitor.ko ]]; then
+    insmod "$ROOT/lkm/pf_monitor.ko" ino="$INO"
+    measure "lkm pf_monitor (kprobe handle_mm_fault)"
+    rmmod pf_monitor
+else
+    echo "(pf_monitor.ko no disponible: se omite la medición del LKM)" | tee -a "$OUT"
+fi
 
 echo "Resultados guardados en $OUT"

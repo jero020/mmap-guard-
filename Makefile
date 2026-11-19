@@ -36,7 +36,13 @@ TEST_BINS := $(patsubst tests/%.c,$(BUILD)/tests/%,$(TEST_SRCS))
 
 .PHONY: all bpf loader lkm tests clean
 
+# El LKM solo se compila si existen los headers del kernel (p. ej. OrbStack no los trae).
+ifneq ($(wildcard $(KDIR)/Makefile),)
 all: bpf loader lkm tests
+else
+all: bpf loader tests
+	@echo "AVISO: no hay headers en $(KDIR); se omitió el LKM (make lkm KDIR=...)"
+endif
 
 $(BUILD) $(BUILD)/tests:
 	mkdir -p $@
@@ -60,6 +66,7 @@ $(LOADER): loader/mmap_guardd.c bpf/mmap_guard.h $(SKEL) | $(BUILD)
 loader: $(LOADER)
 
 lkm:
+	@test -f $(KDIR)/Makefile || { echo "ERROR: faltan headers del kernel en $(KDIR)"; exit 1; }
 	$(MAKE) -C lkm KDIR=$(KDIR)
 
 $(BUILD)/tests/%: tests/%.c tests/common.h | $(BUILD)/tests
@@ -69,4 +76,4 @@ tests: $(TEST_BINS)
 
 clean:
 	rm -rf $(BUILD) $(VMLINUX_H)
-	$(MAKE) -C lkm KDIR=$(KDIR) clean
+	-test -f $(KDIR)/Makefile && $(MAKE) -C lkm KDIR=$(KDIR) clean
