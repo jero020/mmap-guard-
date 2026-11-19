@@ -24,7 +24,10 @@
 #define MG_MAP_SHARED_VALIDATE 0x03
 #define MG_MAP_TYPE         0x0f   /* máscara del tipo de mapeo */
 
-/* VM_SHARED en vm_area_struct->vm_flags (include/linux/mm.h). */
+/* Bits de vm_area_struct->vm_flags (include/linux/mm.h). */
+#define MG_VM_READ          0x00000001UL
+#define MG_VM_WRITE         0x00000002UL
+#define MG_VM_EXEC          0x00000004UL
 #define MG_VM_SHARED        0x00000008UL
 
 /* --- Políticas por archivo (bits de protected_inodes.value) ------------------------ */

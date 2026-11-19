@@ -198,3 +198,57 @@ int BPF_PROG(mg_mmap_file, struct file *file, unsigned long reqprot,
 
     return decide(MG_HOOK_MMAP_FILE, &key, prot, flags, reason);
 }
+
+/* ---------------------------------------------------------------------------------- */
+/* Hook 2: file_mprotect                                                               */
+/* ---------------------------------------------------------------------------------- */
+/*
+ * Firma (include/linux/lsm_hook_defs.h, verificada en 6.8):
+ *   LSM_HOOK(int, 0, file_mprotect, struct vm_area_struct *vma,
+ *            unsigned long reqprot, unsigned long prot)
+ * Lo invoca security_file_mprotect() desde do_mprotect_pkey() (mm/mprotect.c), por cada
+ * VMA afectado, DESPUÉS del chequeo VM_MAY* del kernel (que da -EACCES si el archivo se
+ * abrió O_RDONLY) y ANTES de mprotect_fixup(), que es quien reescribe vm_flags y los PTE.
+ *
+ * Cierra la evasión "mapear PROT_READ (permitido) y luego subir a PROT_WRITE/PROT_EXEC":
+ * sin este hook, mmap_file solo vería la protección inicial.
+ *
+ * Desde Linux 6.3 vm_flags es una unión (vm_flags / __vm_flags); BPF_CORE_READ resuelve
+ * el miembro "vm_flags" igual en ambas versiones.
+ */
+SEC("lsm/file_mprotect")
+int BPF_PROG(mg_file_mprotect, struct vm_area_struct *vma, unsigned long reqprot,
+             unsigned long prot, int ret)
+{
+    struct mg_inode_key key = {};
+    struct file *file;
+    __u32 *policy;
+    __u32 reason = MG_R_NONE;
+    unsigned long vmf;
+
+    (void)reqprot;
+    if (ret != 0)
+        return ret;
+
+    file = BPF_CORE_READ(vma, vm_file);
+    if (file_to_key(file, &key) < 0)
+        return 0;                        /* VMA anónimo (heap, stack, MAP_ANONYMOUS) */
+
+    policy = bpf_map_lookup_elem(&protected_inodes, &key);
+    if (!policy)
+        return 0;
+
+    vmf = BPF_CORE_READ(vma, vm_flags);
+
+    /* +W sobre un VMA compartido: las escrituras irían al page cache y luego a disco.
+     * +W sobre un VMA privado se permite: es Copy-On-Write y nunca llega al archivo. */
+    if ((*policy & MG_POL_NO_MPROTECT_UP) && (prot & MG_PROT_WRITE) &&
+        !(vmf & MG_VM_WRITE) && (vmf & MG_VM_SHARED))
+        reason = MG_R_MPROTECT_WRITE;
+    /* +X sobre cualquier VMA de un archivo protegido. */
+    else if ((*policy & (MG_POL_NO_EXEC | MG_POL_NO_MPROTECT_UP)) &&
+             (prot & MG_PROT_EXEC) && !(vmf & MG_VM_EXEC))
+        reason = MG_R_MPROTECT_EXEC;
+
+    return decide(MG_HOOK_FILE_MPROTECT, &key, prot, vmf, reason);
+}
