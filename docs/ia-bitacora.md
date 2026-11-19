@@ -35,6 +35,7 @@
 | 6 | Nombrar un mapa BPF `config` | Choca con un tipo `config` definido en `vmlinux.h` → `error: unexpected type name 'config'` | Error de compilación de clang | Renombrado a `guard_config` |
 | 7 | En la prueba de `O_RDONLY+MAP_SHARED+PROT_WRITE`, esperar siempre `EACCES` | Con el guard cargado, `vm_mmap_pgoff()` llama a `security_mmap_file()` **antes** de `do_mmap()`, así que el LSM responde primero con `EPERM` | Lectura de `mm/util.c` antes de ejecutar la fase 2 | La prueba acepta ambos e informa qué capa lo negó |
 | 8 | Modificar `vma->vm_flags` directamente (`vma->vm_flags |= ...`) | Desde 6.3 `vm_flags` es `const` en una unión; hay que usar `vm_flags_set()` | Headers 6.8 (`mm_types.h`) | mmap-guard solo **lee** `vm_flags` (válido en todas las versiones) |
+| 10 | Suponer que un programa CO-RE que compila contra el BTF de un kernel compila igual contra cualquier otro | En OrbStack 7.0 + clang 21, `vmlinux.h` trae declaraciones vacías (`struct ns_tree;`) que fallan con `-Werror`, y `vma->vm_file` aparece como `struct file___2 *` (tipo duplicado en el BTF) | `make` en la máquina real (kernel 7.0.14-orbstack) | `#pragma` que silencia solo `-Wmissing-declarations` en el include de `vmlinux.h` y cast explícito de `vm_file` |
 | 9 | Usar `/usr/sbin/bpftool` sin más | En Ubuntu es un wrapper que falla si no hay `linux-tools` del kernel exacto | Error en `make bpf` | El Makefile detecta un `bpftool` funcional |
 
 > Completa con las alucinaciones que encuentres al usar Copilot (por ejemplo helpers BPF
