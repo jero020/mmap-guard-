@@ -55,6 +55,32 @@ static inline void check_control(const char *what, int ok, int err)
         g_failures++;
 }
 
+/* Hash FNV-1a de 64 bits del contenido completo del archivo leído con read(2), es decir,
+ * desde el page cache, que es lo que vería cualquier otro proceso. Devuelve 0 si falla. */
+#include <fcntl.h>
+#include <stdint.h>
+#include <unistd.h>
+static inline uint64_t file_hash(const char *path)
+{
+    unsigned char buf[4096];
+    uint64_t h = 1469598103934665603ULL;
+    ssize_t n;
+    int fd = open(path, O_RDONLY);
+
+    if (fd < 0)
+        return 0;
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {
+        ssize_t i;
+
+        for (i = 0; i < n; i++) {
+            h ^= buf[i];
+            h *= 1099511628211ULL;
+        }
+    }
+    close(fd);
+    return n < 0 ? 0 : h;
+}
+
 static inline int finish(const char *name)
 {
     printf("%s: %s\n", name, g_failures ? "FAIL" : "PASS");
