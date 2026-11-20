@@ -15,6 +15,9 @@ respaldo para kernels sin BPF-LSM.
 | [`docs/ia-bitacora.md`](docs/ia-bitacora.md) | Parte II: flujo con IA, prompts, alucinaciones, validación |
 | [`docs/arquitectura.md`](docs/arquitectura.md) | Parte II: diagrama y decisiones de diseño |
 | [`docs/tradeoffs.md`](docs/tradeoffs.md) | Parte II: matriz rendimiento vs. seguridad |
+| [Informe completo](https://claude.ai/artifact/7Jz3m5iu4eg5hdjzayRWFu) | Partes I, II y III en un solo documento (exportable a PDF) |
+
+**Estado:** compila sin warnings y pasa **12/12 pruebas** en kernel `7.0.14-orbstack` (x86_64) con BPF-LSM activo.
 
 ## Descripción
 
@@ -63,13 +66,15 @@ docs/       informe (Partes I y II)
 
 ## Requisitos
 
-- Linux **5.8+** (ring buffer BPF; BPF-LSM existe desde 5.7). Probado con headers 6.8.
+- Linux **5.8+** (ring buffer BPF; BPF-LSM existe desde 5.7). Compilado contra headers 6.8 y probado
+  en `7.0.14-orbstack` (Ubuntu en OrbStack, clang 21, libbpf 1.6.3).
 - `CONFIG_BPF_LSM=y`, `CONFIG_DEBUG_INFO_BTF=y`, `CONFIG_KPROBES=y`, `CONFIG_KRETPROBES=y`.
 - **`bpf` en `/sys/kernel/security/lsm`**. Si no aparece, agrega `bpf` al parámetro de
   arranque, por ejemplo en `/etc/default/grub`:
   `GRUB_CMDLINE_LINUX="lsm=lockdown,capability,landlock,yama,apparmor,bpf"`, luego
   `sudo update-grub && sudo reboot`.
-  En **OrbStack** o WSL no se controla el arranque: usa el **modo respaldo** del LKM.
+  En WSL u otros entornos donde no se controla el arranque, usa el **modo respaldo** del LKM.
+  OrbStack (kernel 7.0) ya trae `bpf` activo, pero no trae headers: allí el LKM se omite.
 - Paquetes (Ubuntu): `sudo apt install clang llvm libbpf-dev libelf-dev zlib1g-dev make gcc linux-tools-$(uname -r) linux-headers-$(uname -r)`
 
 Diagnóstico automático:
@@ -109,7 +114,7 @@ noexec    /ruta/binario     # bloquea PROT_EXEC y mprotect(+X)
 allow_uid 1000              # audita pero no bloquea a este UID
 ```
 
-Ejemplo de salida:
+Formato de salida (ilustrativo):
 
 ```
 16:58:01.204 mmap     DENY       shared_write pid=4211   uid=1000  comm=test_mmap_share ino=37 prot=rw- flags=0x1
@@ -148,6 +153,18 @@ Solo se usan archivos temporales en `/dev/shm/mmap-guard-demo`. No se incluyen e
 
 ## Resultados
 
+### Pruebas funcionales (entorno real)
+
+| Entorno | Modo | Resultado |
+|---|---|---|
+| Ubuntu en OrbStack, kernel `7.0.14-orbstack`, x86_64, LSM `capability,landlock,yama,bpf` | BPF-LSM | **12 PASS, 0 FAIL** |
+
+Fase 1 (sin guard): los 5 escenarios de ataque y el control funcionan, demostrando el riesgo.
+Fase 2 (con guard): los ataques fallan con `EPERM`, los controles legítimos siguen funcionando y el
+hash de los archivos no cambia, incluso bajo 8 hilos con COW + `MADV_DONTNEED`.
+
+### Overhead
+
 ```bash
 sudo ./tests/bench.sh 100000     # guarda results/bench_<fecha>.txt
 ```
@@ -156,7 +173,7 @@ sudo ./tests/bench.sh 100000     # guarda results/bench_<fecha>.txt
 |---|---|---|---|
 | base | _pendiente_ | _pendiente_ | _pendiente_ |
 | BPF-LSM | _pendiente_ | _pendiente_ | _pendiente_ |
-| LKM pf_monitor | _pendiente_ | _pendiente_ | _pendiente_ |
+| LKM pf_monitor | no medible en OrbStack (sin headers) | — | — |
 
 Lo esperado: BPF-LSM agrega un costo pequeño y constante por `mmap()`/`mprotect()` (dos
 búsquedas hash) y **cero por acceso**; el kprobe en `handle_mm_fault` encarece todos los page

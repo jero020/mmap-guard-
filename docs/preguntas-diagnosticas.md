@@ -71,7 +71,7 @@ En `struct vm_area_struct` la diferencia vive en `vm_flags` y en cómo se resuel
 
 | Aspecto | `MAP_SHARED` | `MAP_PRIVATE` |
 |---|---|---|
-| `vm_flags` | `VM_SHARED | VM_MAYSHARE` | sin `VM_SHARED` |
+| `vm_flags` | `VM_SHARED \| VM_MAYSHARE` | sin `VM_SHARED` |
 | Página tras escritura | la misma *folio* del page cache (`folio->mapping` = `address_space` del inode) | página anónima nueva (`folio->mapping` = `anon_vma`) |
 | PTE inicial | escribible si `VM_WRITE` (salvo *write-notify* para rastreo de suciedad) | **siempre de solo lectura**, aunque el VMA tenga `VM_WRITE`: así se detecta la primera escritura y se hace COW |
 | Persistencia | sí: writeback lleva las páginas sucias al archivo | no: se pierde en `munmap`/exit |

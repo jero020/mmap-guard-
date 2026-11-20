@@ -52,8 +52,8 @@ flowchart TD
 
 | Directiva (`protected.conf`) | Bits | Bloquea |
 |---|---|---|
-| `protect <ruta>` | `NO_SHARED_WRITE | NO_MPROTECT_UP` | `mmap(PROT_WRITE, MAP_SHARED[_VALIDATE])`, `mprotect(+W)` en VMA compartido, `mprotect(+X)` |
-| `noexec <ruta>` | `NO_EXEC | NO_MPROTECT_UP` | `mmap(PROT_EXEC)`, `mprotect(+X)` |
+| `protect <ruta>` | `NO_SHARED_WRITE \| NO_MPROTECT_UP` | `mmap(PROT_WRITE, MAP_SHARED[_VALIDATE])`, `mprotect(+W)` en VMA compartido, `mprotect(+X)` |
+| `noexec <ruta>` | `NO_EXEC \| NO_MPROTECT_UP` | `mmap(PROT_EXEC)`, `mprotect(+X)` |
 | `allow_uid <uid>` | — | nada: audita como `ALLOW_WL` |
 
 Se permite siempre: lectura compartida o privada y escritura privada (COW), porque no
