@@ -8,6 +8,8 @@ respaldo para kernels sin BPF-LSM.
 
 > Parcial 25 %, Sistemas Operativos, EAFIT 2026-2:
 > *Seguridad de Archivos mediante Intervención en la Capa del Kernel y mmap*.
+>
+> **Autor:** Jerónimo Velez Acosta
 
 | Documento | Contenido |
 |---|---|
