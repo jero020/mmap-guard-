@@ -169,15 +169,35 @@ hash de los archivos no cambia, incluso bajo 8 hilos con COW + `MADV_DONTNEED`.
 sudo ./tests/bench.sh 100000     # guarda results/bench_<fecha>.txt
 ```
 
-| Configuración | `mmap+munmap` (ns/op) | fault de lectura (ns/página) | page-faults (`perf stat`) |
-|---|---|---|---|
-| base | _pendiente_ | _pendiente_ | _pendiente_ |
-| BPF-LSM | _pendiente_ | _pendiente_ | _pendiente_ |
-| LKM pf_monitor | no medible en OrbStack (sin headers) | — | — |
+Medido con `sudo ./tests/bench.sh 100000` en Ubuntu sobre OrbStack (kernel `7.0.14-orbstack`),
+3 corridas por configuración. En la corrida BPF el loader está en modo auditoría (`-a`), así que el
+costo del hook es el mismo que en bloqueo, pero cada intento denegado genera un evento.
 
-Lo esperado: BPF-LSM agrega un costo pequeño y constante por `mmap()`/`mprotect()` (dos
-búsquedas hash) y **cero por acceso**; el kprobe en `handle_mm_fault` encarece todos los page
-faults del sistema, por eso se usa solo para medir.
+| Configuración | `mmap+munmap` (ns/op), media ± desv. | Rango (ns/op) | Fault de lectura (ns/página) | Page faults |
+|---|---|---|---|---|
+| Base, sin guard | 1636.5 ± 380.9 | 1239.2 a 1998.6 | 90.4 ± 8.1 | 8081 |
+| BPF-LSM cargado | 1810.1 ± 433.2 | 1309.9 a 2061.7 | 86.3 ± 2.8 | 8080 |
+| LKM pf_monitor | no medible en OrbStack (sin headers) | — | — | — |
+
+`perf stat` sobre `test_concurrency` (8 hilos × 2000 iteraciones):
+
+| Métrica | Base | BPF-LSM | Cambio |
+|---|---|---|---|
+| page-faults | 8081 | 8080 | 0 % |
+| context-switches | 2324 | 3008 | +29.4 % |
+| task-clock (ms) | 170.67 | 208.65 | +22.3 % |
+| tiempo transcurrido (s) | 0.104 | 0.115 | +10.1 % |
+
+**Lectura:**
+- **`mmap()`**: la media sube 174 ns (+10.6 %), pero la desviación entre corridas es de unos 400 ns
+  y los rangos se solapan: en esta VM el costo del hook no se distingue del ruido. Por diseño es
+  una o dos búsquedas hash por llamada.
+- **Page faults**: sin cambio (86 vs. 90 ns/página, dentro del ruido; el mismo número de faults).
+  Es lo esperado: mmap-guard no instrumenta `handle_mm_fault`, así que los accesos no pagan nada.
+- **CPU y cambios de contexto (+22 % / +29 %)**: no vienen de la decisión del hook sino de la
+  **auditoría**. La prueba hace 8000 intentos de mapeo compartido sobre el archivo protegido; cada
+  uno genera un evento en el ring buffer que despierta a `mmap_guardd` para imprimirlo. Es el costo
+  de registrar ataques, y solo aparece cuando hay intentos que auditar.
 
 ### ¿Por qué en kernel y no en espacio de usuario?
 
